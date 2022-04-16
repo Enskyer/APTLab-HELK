@@ -23,6 +23,8 @@ INSTALL_ERROR_CHECK_WIKI="$HELK_ERROR_TAG Check the requirements section in the 
 INSTALL_MINIMUM_MEMORY=5000
 ## In MBs
 INSTALL_MINIMUM_MEMORY_NOTEBOOK=8000
+## In MBs
+INSTALL_MINIMUM_MEMORY_NOTEBOOK_NEO4J=16000
 ## In GBs
 INSTALL_MINIMUM_DISK=20
 ## Sysctl Parameters
@@ -328,6 +330,36 @@ set_kibana_ui_password() {
   fi
 }
 
+# *********** Set aptlab-helk neo4j password ******************************
+set_neo4j_password() {
+  if [[ ${HELK_BUILD} == "aptlab-helk-kibana-notebook-neo4j-analysis" ]]; then
+    if [[ -z "$NEO4J_PASSWORD_INPUT" ]]; then
+      echo "$HELK_INFO_TAG Please make sure to create a custom Neo4j password and store it securely for future use."
+      sleep 1
+      while true; do
+        read -t 90 -p "$HELK_INFO_TAG Set APTLab-HELK Neo4j Password: " -e -i "helk-n304j" NEO4J_PASSWORD_INPUT
+        READ_INPUT=$?
+        NEO4J_PASSWORD_INPUT=${NEO4J_PASSWORD_INPUT:-"helk-n304j"}
+        if [ $READ_INPUT = 142 ]; then
+          echo -e "\n$HELK_INFO_TAG APTLab-HELK Neo4j password set to ${NEO4J_PASSWORD_INPUT}"
+          break
+        else
+          read -p "$HELK_INFO_TAG Verify APTLab-HELK Neo4j Password: " NEO4J_PASSWORD_INPUT_VERIFIED
+          #echo -e "$HELK_INFO_TAG APTLab-HELK Neo4j password set to ${NEO4J_PASSWORD_INPUT}"
+          # *********** Validating Password Input ***************
+          if [[ "$NEO4J_PASSWORD_INPUT" == "$NEO4J_PASSWORD_INPUT_VERIFIED" ]]; then
+            break
+          else
+            echo -e "${RED}Error...${STD}"
+            echo "$HELK_INFO_TAG Your password values do not match.."
+          fi
+        fi
+      done
+    fi
+    echo -n "NEO4J_AUTH=neo4j/$NEO4J_PASSWORD_INPUT" > helk-neo4j/auth.env
+  fi
+}
+
 # *********** Set HELK network settings ***************
 set_network() {
   if [[ -z "$HOST_IP" ]]; then
@@ -372,14 +404,15 @@ set_helk_build() {
   if [[ -z "$HELK_BUILD" ]]; then
     while true; do
       echo " "
-      echo "*****************************************************"
-      echo "*      HELK - Docker Compose Build Choices          *"
-      echo "*****************************************************"
+      echo "*********************************************************"
+      echo "*      HELK - Docker Compose Build Choices              *"
+      echo "*********************************************************"
       echo " "
       echo "1. KAFKA + KSQL + ELK + NGINX"
       echo "2. KAFKA + KSQL + ELK + NGINX + ELASTALERT"
       echo "3. KAFKA + KSQL + ELK + NGINX + SPARK + JUPYTER"
       echo "4. KAFKA + KSQL + ELK + NGINX + SPARK + JUPYTER + ELASTALERT"
+      echo "APTLab. KAFKA + KSQL + ELK + NGINX + SPARK + JUPYTER + NEO4J"
       echo " "
 
       local CONFIG_CHOICE
@@ -413,6 +446,17 @@ set_helk_build() {
             sleep 4
           else
             HELK_BUILD='helk-kibana-notebook-analysis-alert'
+                        break;
+          fi
+          ;;
+        APTLab)
+          if [[ $AVAILABLE_MEMORY -le $INSTALL_MINIMUM_MEMORY_NOTEBOOK_NEO4J ]]; then
+            echo "$HELK_INFO_TAG Your available memory for APTLab-HELK build option ${HELK_BUILD} is not enough."
+            echo "$HELK_INFO_TAG Minimum required for this build option is $INSTALL_MINIMUM_MEMORY_NOTEBOOK_NEO4J MBs."
+            echo "$HELK_INFO_TAG Please Select option 1 or re-run the script after assigning the correct amount of memory"
+            sleep 4
+          else
+            HELK_BUILD='aptlab-helk-kibana-notebook-neo4j-analysis'
                         break;
           fi
           ;;
@@ -508,7 +552,7 @@ prepare_helk() {
 }
 
 get_jupyter_credentials() {
-  if [[ ${HELK_BUILD} == "helk-kibana-notebook-analysis" ]] || [[ ${HELK_BUILD} == "helk-kibana-notebook-analysis-alert" ]]; then
+  if [[ ${HELK_BUILD} == "helk-kibana-notebook-analysis" ]] || [[ ${HELK_BUILD} == "helk-kibana-notebook-analysis-alert" ]] || [[ ${HELK_BUILD} == "aptlab-helk-kibana-notebook-neo4j-analysis" ]]; then
     until (docker logs helk-jupyter 2>&1 | grep -q "The Jupyter Notebook is running at"); do sleep 5; done
     jupyter_token="$(docker exec -i helk-jupyter jupyter notebook list | grep "token" | sed 's/.*token=\([^ ]*\).*/\1/')" >>$LOGFILE 2>&1
     echo "HELK JUPYTER CURRENT TOKEN: ${jupyter_token}"
@@ -523,14 +567,14 @@ check_logstash_connected() {
 show_banner() {
   # *********** Showing HELK Docker menu options ***************
   echo " "
-  echo "***********************************************"
-  echo "**          HELK - THE HUNTING ELK           **"
-  echo "**                                           **"
-  echo "** Author: Roberto Rodriguez (@Cyb3rWard0g)  **"
-  echo "** HELK build version: ${HELK_BUILD_VERSION} **"
-  echo "** HELK ELK version: ${HELK_ELK_VERSION}     **"
-  echo "** License: GPL-3.0                          **"
-  echo "***********************************************"
+  echo "*********************************************************"
+  echo "**                HELK - THE HUNTING ELK               **"
+  echo "**                                                     **"
+  echo "** Author: Roberto Rodriguez (@Cyb3rWard0g), stavhaygn **"
+  echo "** HELK build version: ${HELK_BUILD_VERSION}            **"
+  echo "** HELK ELK version: ${HELK_ELK_VERSION}                             **"
+  echo "** License: GPL-3.0                                    **"
+  echo "*********************************************************"
   echo " "
 }
 
@@ -546,6 +590,17 @@ show_final_information() {
     echo "HELK KIBANA URL: https://${HOST_IP}"
     echo "HELK KIBANA USER: helk"
     echo "HELK KIBANA PASSWORD: ${KIBANA_UI_PASSWORD_INPUT}"
+    echo "HELK SPARK MASTER UI: https://${HOST_IP}:8080"
+    echo "HELK JUPYTER SERVER URL: https://${HOST_IP}/jupyter"
+    get_jupyter_credentials
+  elif [[ ${HELK_BUILD} == "aptlab-helk-kibana-notebook-neo4j-analysis" ]]; then
+    echo "HELK KIBANA URL: https://${HOST_IP}"
+    echo "HELK KIBANA USER: helk"
+    echo "HELK KIBANA PASSWORD: ${KIBANA_UI_PASSWORD_INPUT}"
+    echo "HELK NEO4J BROWSER URL: https://${HOST_IP}/neo4j/"
+    echo "HELK NEO4J BOLT URL: bolt+s://${HOST_IP}:7687"
+    echo "HELK NEO4J USER: neo4j"
+    echo "HELK NEO4J PASSWORD: ${NEO4J_PASSWORD_INPUT}"
     echo "HELK SPARK MASTER UI: https://${HOST_IP}:8080"
     echo "HELK JUPYTER SERVER URL: https://${HOST_IP}/jupyter"
     get_jupyter_credentials
@@ -580,6 +635,7 @@ install_helk() {
   set_helk_build
   set_network
   set_kibana_ui_password
+  set_neo4j_password
   prepare_helk
   persist_conf
   set_install_info
@@ -594,24 +650,27 @@ usage() {
   echo "Usage: $0 [option...]" >&2
   echo
   echo "   -p         set helk kibana ui password"
+  echo "   -n         set aptlab-helk neo4j password (only for aptlab-helk-kibana-notebook-neo4j-analysis)"
   echo "   -i         set HELKs IP address"
   echo "   -b         set HELKs build (helk-kibana-analysis OR helk-kibana-notebook-analysis)"
   echo "   -q         quiet -> not output to the console"
   echo
   echo "Examples:"
-  echo " $0                                                                                           Install HELK manually"
-  echo " $0 -p As3gur@! -i 192.168.64.131 -b 'helk-kibana-analysis'                                   Install HELK quietly"
+  echo " $0                                                                                             Install HELK manually"
+  echo " $0 -p As3gur@! -i 192.168.64.131 -b 'helk-kibana-analysis'                                     Install HELK quietly"
+  echo " $0 -p As3gur@! -n WGuch02g -i 192.168.64.131 -b 'aptlab-helk-kibana-notebook-neo4j-analysis'   Install APTLab-HELK quietly"
   echo " "
   exit 1
 }
 
 # ************ Start HELK Install **********************
 # ************ Command Options **********************
-while getopts p:i:b:l:eq option
+while getopts p:n:i:b:l:eq option
 do
     case "${option}"
     in
   p) KIBANA_UI_PASSWORD_INPUT=$OPTARG ;;
+  n) NEO4J_PASSWORD_INPUT=$OPTARG ;;
   i) HOST_IP=$OPTARG ;;
   b) HELK_BUILD=$OPTARG ;;
   e) ELASTICSEARCH_PASSWORD_INPUT=$OPTARG ;;
@@ -636,6 +695,7 @@ else
     helk-kibana-analysis-alert) ;;
     helk-kibana-notebook-analysis) ;;
     helk-kibana-notebook-analysis-alert) ;;
+    aptlab-helk-kibana-notebook-neo4j-analysis) ;;
     *)
       echo "$HELK_ERROR_TAG Not a valid build. Valid Options: kafka, helk-kibana-analysis OR helk-kibana-notebook-analysis "
       usage
